@@ -49,5 +49,67 @@
   (let ((default-directory (file-name-as-directory (lean4-lake-find-dir-safe))))
     (compile (concat (lean4-get-executable lean4-lake-name) " build"))))
 
+(defun lean4-lake-file-path (dir)
+  "Return the full path of lakefile.lean in DIR."
+  (expand-file-name "lakefile.lean" dir))
+
+(defun lean4-lake-file-exists-p (dir)
+  "Check if lakefile.lean exists in DIR."
+  (file-exists-p (lean4-lake-file-path dir)))
+
+(defun lean4-lake-read-file (file)
+  "Read contents of FILE into a string."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (buffer-string)))
+
+(defun lean4-lake-extract-executables (content)
+  "Extract executable names from lakefile CONTENT."
+  (let (executables)
+    (with-temp-buffer
+      (insert content)
+      (goto-char (point-min))
+      (while (re-search-forward "^lean_exe\\s-+\\(?:«\\(.+?\\)»\\|\\(\\w+\\)\\)" nil t)
+        (push (or (match-string 1) (match-string 2)) executables)))
+    executables))
+
+(defun lean4-lake-get-executables (dir)
+  "Extract executable names from lakefile.lean in DIR."
+  (let ((lakefile (lean4-lake-file-path dir)))
+    (if (lean4-lake-file-exists-p dir)
+        (let* ((content (lean4-lake-read-file lakefile))
+               (executables (lean4-lake-extract-executables content)))
+          (if executables
+              (progn
+                (message "Found executables: %s" executables)
+                executables)
+            (message "No executables found in %s" lakefile)
+            nil))
+      (message "lakefile.lean not found in %s" dir)
+      nil)))
+
+(defun lean4-lake-exe ()
+  "Open a menu of executables from lakefile.lean and run the selected one."
+  (interactive)
+  (let* ((lake-dir (lean4-lake-find-dir-safe))
+         (lake-default-directory (file-name-as-directory lake-dir))
+         (executables (lean4-lake-get-executables lake-dir)))
+    (if executables
+        (let* ((selected (completing-read "Select executable: " executables nil t))
+               (buffer-name (format "*lean4-lake-exe-%s*" selected))
+               (existing-buffer (get-buffer buffer-name)))
+          (when existing-buffer
+            (kill-buffer existing-buffer))
+          (when selected
+            (let ((buffer (get-buffer-create buffer-name)))
+              (with-current-buffer buffer
+                (erase-buffer)
+                (compilation-mode))
+              (display-buffer buffer)
+              (let ((default-directory lake-default-directory))
+                (start-process selected buffer
+                               (lean4-get-executable lean4-lake-name) "exe" selected)))))
+      (message "No executables found in lakefile.lean. Make sure the file contains 'lean_exe' declarations."))))
+
 (provide 'lean4-lake)
 ;;; lean4-lake.el ends here
